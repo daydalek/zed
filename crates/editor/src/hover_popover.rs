@@ -8,10 +8,10 @@ use crate::{
 };
 use anyhow::Context as _;
 use gpui::{
-    canvas, AnyElement, AsyncWindowContext, Bounds, Context, Entity, Focusable as _, FontWeight,
-    Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, ScrollHandle, Size,
-    StatefulInteractiveElement, StyleRefinement, Styled, Subscription, Task, TextStyleRefinement,
-    WeakEntity, Window, div, px,
+    canvas, App, AnyElement, AsyncApp, AsyncWindowContext, Bounds, Context, Entity, Focusable as _,
+    FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
+    ScrollHandle, Size, StatefulInteractiveElement, StyleRefinement, Styled, Subscription, Task,
+    TextStyleRefinement, WeakEntity, Window, div, px,
 };
 use itertools::Itertools;
 use language::{DiagnosticEntry, Language, LanguageRegistry};
@@ -77,11 +77,11 @@ pub fn hover_at(
 
             let delay = 300; // Fixed 300ms hiding delay
             if delay > 0 {
-                let task = cx.spawn(|this: WeakEntity<Editor>, mut cx: AsyncWindowContext| async move {
+                let task = cx.spawn(|this: WeakEntity<Editor>, mut cx: &mut AsyncApp| async move {
                     cx.background_executor()
                         .timer(Duration::from_millis(delay as u64))
                         .await;
-                    this.update(&mut cx, |editor, cx| {
+                    this.update(cx, |editor, cx| {
                         hide_hover(editor, cx);
                     })
                     .ok();
@@ -1035,8 +1035,8 @@ impl InfoPopover {
             )
             // Prevent a mouse down/move on the popover from being propagated to the editor,
             // because that would dismiss the popover.
-            .on_mouse_move(|_, _, cx: &mut Context<Editor>| cx.stop_propagation())
-            .on_mouse_down(MouseButton::Left, move |_, _, cx: &mut Context<Editor>| {
+            .on_mouse_move(|_, _, cx: &mut App| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Left, move |_, _, cx: &mut App| {
                 let mut keyboard_grace = keyboard_grace.borrow_mut();
                 *keyboard_grace = false;
                 cx.stop_propagation();
@@ -1127,10 +1127,10 @@ impl DiagnosticPopover {
             })
             // Prevent a mouse move on the popover from being propagated to the editor,
             // because that would dismiss the popover.
-            .on_mouse_move(|_, _, cx: &mut Context<Editor>| cx.stop_propagation())
+            .on_mouse_move(|_, _, cx: &mut App| cx.stop_propagation())
             // Prevent a mouse down on the popover from being propagated to the editor,
             // because that would move the cursor.
-            .on_mouse_down(MouseButton::Left, move |_, _, cx: &mut Context<Editor>| {
+            .on_mouse_down(MouseButton::Left, move |_, _, cx: &mut App| {
                 let mut keyboard_grace = keyboard_grace.borrow_mut();
                 *keyboard_grace = false;
                 cx.stop_propagation();
