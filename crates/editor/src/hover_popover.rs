@@ -8,10 +8,10 @@ use crate::{
 };
 use anyhow::Context as _;
 use gpui::{
-    AnyElement, AsyncWindowContext, Bounds, Context, Entity, Focusable as _, FontWeight, Hsla,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, ScrollHandle, Size,
+    canvas, AnyElement, AsyncWindowContext, Bounds, Context, Entity, Focusable as _, FontWeight,
+    Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, ScrollHandle, Size,
     StatefulInteractiveElement, StyleRefinement, Styled, Subscription, Task, TextStyleRefinement,
-    Window, div, px,
+    WeakView, Window, WindowContext, div, px,
 };
 use itertools::Itertools;
 use language::{DiagnosticEntry, Language, LanguageRegistry};
@@ -853,8 +853,8 @@ impl HoverState {
     pub fn is_mouse_getting_closer(
         &mut self,
         mouse_position: gpui::Point<Pixels>,
-        window: &Window,
-        cx: &mut Context<Editor>,
+        _window: &Window,
+        _cx: &mut Context<Editor>,
     ) -> bool {
         if !self.visible() {
             return false;

@@ -4,7 +4,7 @@ use crate::{
     Navigated, PointForPosition, SelectPhase, editor_settings::GoToDefinitionFallback,
     scroll::ScrollAmount,
 };
-use gpui::{App, AsyncWindowContext, Context, Entity, Modifiers, Pixels, Point, Task, Window, px};
+use gpui::{App, AsyncWindowContext, Context, Entity, Modifiers, Pixels, Task, Window, px};
 use language::{Bias, ToOffset};
 use linkify::{LinkFinder, LinkKind};
 use lsp::LanguageServerId;

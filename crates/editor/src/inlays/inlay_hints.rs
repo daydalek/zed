@@ -7,7 +7,7 @@ use std::{
 use clock::Global;
 use collections::{HashMap, HashSet};
 use futures::future::join_all;
-use gpui::{App, Entity, Pixels, Point, Task};
+use gpui::{App, Entity, Pixels, Task};
 use language::{
     BufferRow,
     language_settings::{InlayHintKind, InlayHintSettings},
