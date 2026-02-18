@@ -8,8 +8,8 @@ use crate::{
 };
 use anyhow::Context as _;
 use gpui::{
-    AnyElement, AsyncWindowContext, Context, Entity, Focusable as _, FontWeight, Hsla,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, ScrollHandle, Size,
+    AnyElement, AsyncWindowContext, Bounds, Context, Entity, Focusable as _, FontWeight, Hsla,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, ScrollHandle, Size,
     StatefulInteractiveElement, StyleRefinement, Styled, Subscription, Task, TextStyleRefinement,
     Window, div, px,
 };
@@ -45,6 +45,7 @@ pub fn hover(editor: &mut Editor, _: &Hover, window: &mut Window, cx: &mut Conte
 pub fn hover_at(
     editor: &mut Editor,
     anchor: Option<Anchor>,
+    mouse_position: Option<gpui::Point<Pixels>>,
     window: &mut Window,
     cx: &mut Context<Editor>,
 ) {
@@ -52,10 +53,43 @@ pub fn hover_at(
         if show_keyboard_hover(editor, window, cx) {
             return;
         }
+
         if let Some(anchor) = anchor {
+            editor.hover_state.hiding_delay_task = None;
+            editor.hover_state.closest_mouse_distance = None;
             show_hover(editor, anchor, false, window, cx);
         } else {
-            hide_hover(editor, cx);
+            let mut getting_closer = false;
+            if let Some(mouse_position) = mouse_position {
+                getting_closer =
+                    editor
+                        .hover_state
+                        .is_mouse_getting_closer(mouse_position, window, cx);
+            }
+
+            if getting_closer {
+                return;
+            }
+
+            if editor.hover_state.hiding_delay_task.is_some() {
+                return;
+            }
+
+            let delay = 300; // Fixed 300ms hiding delay
+            if delay > 0 {
+                let task = cx.spawn(|this, mut cx| async move {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(delay))
+                        .await;
+                    this.update(&mut cx, |editor, cx| {
+                        hide_hover(editor, cx);
+                    })
+                    .ok();
+                });
+                editor.hover_state.hiding_delay_task = Some(task);
+            } else {
+                hide_hover(editor, cx);
+            }
         }
     }
 }
@@ -187,6 +221,7 @@ pub fn hover_at_inlay(
                     scroll_handle,
                     keyboard_grace: Rc::new(RefCell::new(false)),
                     anchor: None,
+                    last_bounds: None,
                     _subscription: subscription,
                 };
 
@@ -398,6 +433,7 @@ fn show_hover(
                     background_color,
                     keyboard_grace: Rc::new(RefCell::new(ignore_timeout)),
                     anchor,
+                    last_bounds: None,
                     _subscription: subscription,
                 })
             } else {
@@ -466,6 +502,7 @@ fn show_hover(
                     scroll_handle,
                     keyboard_grace: Rc::new(RefCell::new(ignore_timeout)),
                     anchor: Some(anchor),
+                    last_bounds: None,
                     _subscription: subscription,
                 })
             }
@@ -507,6 +544,7 @@ fn show_hover(
                     scroll_handle,
                     keyboard_grace: Rc::new(RefCell::new(ignore_timeout)),
                     anchor: Some(anchor),
+                    last_bounds: None,
                     _subscription: subscription,
                 });
             }
@@ -802,11 +840,64 @@ pub struct HoverState {
     pub diagnostic_popover: Option<DiagnosticPopover>,
     pub triggered_from: Option<Anchor>,
     pub info_task: Option<Task<Option<()>>>,
+    pub last_mouse_position: Option<gpui::Point<Pixels>>,
+    pub closest_mouse_distance: Option<Pixels>,
+    pub hiding_delay_task: Option<Task<()>>,
 }
 
 impl HoverState {
     pub fn visible(&self) -> bool {
         !self.info_popovers.is_empty() || self.diagnostic_popover.is_some()
+    }
+
+    pub fn is_mouse_getting_closer(
+        &mut self,
+        mouse_position: gpui::Point<Pixels>,
+        window: &Window,
+        cx: &mut Context<Editor>,
+    ) -> bool {
+        if !self.visible() {
+            return false;
+        }
+
+        let mut popover_bounds = Vec::new();
+        for info_popover in &self.info_popovers {
+            if let Some(bounds) = info_popover.last_bounds {
+                popover_bounds.push(bounds);
+            }
+        }
+        if let Some(diagnostic_popover) = &self.diagnostic_popover {
+            if let Some(bounds) = diagnostic_popover.last_bounds {
+                popover_bounds.push(bounds);
+            }
+        }
+
+        if popover_bounds.is_empty() {
+            return false;
+        }
+
+        let distance = popover_bounds
+            .iter()
+            .map(|bounds| self.distance_from_point_to_bounds(mouse_position, *bounds))
+            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(px(f32::MAX));
+
+        if let Some(closest_distance) = self.closest_mouse_distance {
+            if distance > closest_distance + px(4.0) {
+                return false;
+            }
+        }
+
+        self.closest_mouse_distance = Some(distance.min(self.closest_mouse_distance.unwrap_or(distance)));
+        true
+    }
+
+    fn distance_from_point_to_bounds(&self, point: gpui::Point<Pixels>, bounds: Bounds<Pixels>) -> Pixels {
+        let center_x = bounds.origin.x + bounds.size.width / 2.;
+        let center_y = bounds.origin.y + bounds.size.height / 2.;
+        let dx = (point.x - center_x).abs() - bounds.size.width / 2.;
+        let dy = (point.y - center_y).abs() - bounds.size.height / 2.;
+        px((dx.max(px(0.)).0.powi(2) + dy.max(px(0.)).0.powi(2)).sqrt())
     }
 
     pub(crate) fn render(
@@ -911,6 +1002,7 @@ pub struct InfoPopover {
     pub scroll_handle: ScrollHandle,
     pub keyboard_grace: Rc<RefCell<bool>>,
     pub anchor: Option<Anchor>,
+    pub last_bounds: Option<Bounds<Pixels>>,
     _subscription: Option<Subscription>,
 }
 
@@ -922,10 +1014,18 @@ impl InfoPopover {
         cx: &mut Context<Editor>,
     ) -> AnyElement {
         let keyboard_grace = Rc::clone(&self.keyboard_grace);
+        let this = cx.entity().downgrade();
         div()
             .id("info_popover")
             .occlude()
             .elevation_2(cx)
+            .on_prepaint(move |bounds, _, cx| {
+                this.update(cx, |this, _| {
+                    if let Some(popover) = this.hover_state.info_popovers.iter_mut().find(|p| p.parsed_content.is_some()) {
+                        popover.last_bounds = Some(bounds);
+                    }
+                }).ok();
+            })
             // Prevent a mouse down/move on the popover from being propagated to the editor,
             // because that would dismiss the popover.
             .on_mouse_move(|_, _, cx| cx.stop_propagation())
@@ -981,6 +1081,7 @@ pub struct DiagnosticPopover {
     background_color: Hsla,
     pub keyboard_grace: Rc<RefCell<bool>>,
     pub anchor: Anchor,
+    pub last_bounds: Option<Bounds<Pixels>>,
     _subscription: Subscription,
     pub scroll_handle: ScrollHandle,
 }
@@ -998,6 +1099,13 @@ impl DiagnosticPopover {
             .id("diagnostic")
             .occlude()
             .elevation_2_borderless(cx)
+            .on_prepaint(move |bounds, _, cx| {
+                this.update(cx, |this, _| {
+                    if let Some(popover) = this.hover_state.diagnostic_popover.as_mut() {
+                        popover.last_bounds = Some(bounds);
+                    }
+                }).ok();
+            })
             // Don't draw the background color if the theme
             // allows transparent surfaces.
             .when(theme_is_transparent(cx), |this| {
@@ -1175,7 +1283,7 @@ mod tests {
             let anchor = snapshot
                 .buffer_snapshot()
                 .anchor_before(hover_point.to_offset(&snapshot, Bias::Left));
-            hover_at(editor, Some(anchor), window, cx)
+            hover_at(editor, Some(anchor), None, window, cx)
         });
         assert!(!cx.editor(|editor, _window, _cx| editor.hover_state.visible()));
 
@@ -1275,7 +1383,7 @@ mod tests {
             let anchor = snapshot
                 .buffer_snapshot()
                 .anchor_before(hover_point.to_offset(&snapshot, Bias::Left));
-            hover_at(editor, Some(anchor), window, cx)
+            hover_at(editor, Some(anchor), None, window, cx)
         });
         cx.background_executor
             .advance_clock(Duration::from_millis(get_hover_popover_delay(&cx) + 100));
@@ -1313,7 +1421,7 @@ mod tests {
             let anchor = snapshot
                 .buffer_snapshot()
                 .anchor_before(hover_point.to_offset(&snapshot, Bias::Left));
-            hover_at(editor, Some(anchor), window, cx)
+            hover_at(editor, Some(anchor), None, window, cx)
         });
         assert!(!cx.editor(|editor, _window, _cx| editor.hover_state.visible()));
 
@@ -1367,7 +1475,7 @@ mod tests {
             let anchor = snapshot
                 .buffer_snapshot()
                 .anchor_before(hover_point.to_offset(&snapshot, Bias::Left));
-            hover_at(editor, Some(anchor), window, cx)
+            hover_at(editor, Some(anchor), None, window, cx)
         });
         cx.background_executor
             .advance_clock(Duration::from_millis(get_hover_popover_delay(&cx) + 100));
@@ -1776,6 +1884,7 @@ mod tests {
             editor.update_inlay_link_and_hover_points(
                 &editor.snapshot(window, cx),
                 new_type_hint_part_hover_position,
+                None,
                 true,
                 false,
                 window,
@@ -1846,6 +1955,7 @@ mod tests {
             editor.update_inlay_link_and_hover_points(
                 &editor.snapshot(window, cx),
                 new_type_hint_part_hover_position,
+                None,
                 true,
                 false,
                 window,
@@ -1901,6 +2011,7 @@ mod tests {
             editor.update_inlay_link_and_hover_points(
                 &editor.snapshot(window, cx),
                 struct_hint_part_hover_position,
+                None,
                 true,
                 false,
                 window,
