@@ -1481,11 +1481,7 @@ impl EditorElement {
                     .anchor_before(point.to_offset(&position_map.snapshot, Bias::Left));
                 hover_at(editor, Some(anchor), Some(event.position), window, cx);
                 Self::update_visible_cursor(editor, point, position_map, window, cx);
-            } else if !should_keep_diagnostic_hover(
-                editor,
-                &position_map.snapshot,
-                point_for_position.previous_valid.row(),
-            ) {
+            } else {
                 editor.update_inlay_link_and_hover_points(
                     &position_map.snapshot,
                     point_for_position,
