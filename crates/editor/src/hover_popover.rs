@@ -991,7 +991,6 @@ impl InfoPopover {
         cx: &mut Context<Editor>,
     ) -> AnyElement {
         let keyboard_grace = Rc::clone(&self.keyboard_grace);
-        let _this = cx.entity().downgrade();
         let bounds_cell = self.last_bounds.clone();
         div()
             .id("info_popover")
