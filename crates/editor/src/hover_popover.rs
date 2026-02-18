@@ -84,11 +84,7 @@ pub fn hover_at(
                             .timer(Duration::from_millis(delay))
                             .await;
                         this.update(&mut cx, |editor, cx| {
-                            editor.hover_state.hiding_delay_task = None;
-                            editor.hover_state.closest_mouse_distance = None;
-                            editor.hover_state.info_popovers = Vec::new();
-                            editor.hover_state.diagnostic_popover = None;
-                            cx.notify();
+                            hide_hover(editor, cx);
                         })
                         .ok();
                     }
@@ -258,6 +254,8 @@ pub fn hide_hover(editor: &mut Editor, cx: &mut Context<Editor>) -> bool {
 
     editor.hover_state.info_task = None;
     editor.hover_state.triggered_from = None;
+    editor.hover_state.hiding_delay_task = None;
+    editor.hover_state.closest_mouse_distance = None;
 
     editor.clear_background_highlights::<HoverState>(cx);
 
