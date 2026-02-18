@@ -77,15 +77,21 @@ pub fn hover_at(
 
             let delay = 300u64; // Fixed 300ms hiding delay
             if delay > 0 {
-                let task = cx.spawn(move |this: WeakEntity<Editor>, cx: &mut AsyncApp| async move {
+                let task = cx.spawn(move |this: WeakEntity<Editor>, cx: &mut AsyncApp| {
                     let mut cx = cx.clone();
-                    cx.background_executor()
-                        .timer(Duration::from_millis(delay))
-                        .await;
-                    this.update(&mut cx, |editor, cx| {
-                        hide_hover(editor, cx);
-                    })
-                    .ok();
+                    async move {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(delay))
+                            .await;
+                        this.update(&mut cx, |editor, cx| {
+                            editor.hover_state.hiding_delay_task = None;
+                            editor.hover_state.closest_mouse_distance = None;
+                            editor.hover_state.info_popovers = Vec::new();
+                            editor.hover_state.diagnostic_popover = None;
+                            cx.notify();
+                        })
+                        .ok();
+                    }
                 });
                 editor.hover_state.hiding_delay_task = Some(task);
             } else {
