@@ -75,13 +75,14 @@ pub fn hover_at(
                 return;
             }
 
-            let delay = 300; // Fixed 300ms hiding delay
+            let delay = 300u64; // Fixed 300ms hiding delay
             if delay > 0 {
-                let task = cx.spawn(|this: WeakEntity<Editor>, mut cx: &mut AsyncApp| async move {
+                let task = cx.spawn(move |this: WeakEntity<Editor>, cx| async move {
+                    let mut cx = cx.clone();
                     cx.background_executor()
-                        .timer(Duration::from_millis(delay as u64))
+                        .timer(Duration::from_millis(delay))
                         .await;
-                    this.update(cx, |editor, cx| {
+                    this.update(&mut cx, |editor, cx| {
                         hide_hover(editor, cx);
                     })
                     .ok();
@@ -1014,7 +1015,7 @@ impl InfoPopover {
         cx: &mut Context<Editor>,
     ) -> AnyElement {
         let keyboard_grace = Rc::clone(&self.keyboard_grace);
-        let this = cx.entity().downgrade();
+        let _this = cx.entity().downgrade();
         let bounds_cell = self.last_bounds.clone();
         div()
             .id("info_popover")
