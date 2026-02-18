@@ -20,7 +20,7 @@ use markdown::{Markdown, MarkdownElement, MarkdownStyle};
 use multi_buffer::{MultiBufferOffset, ToOffset, ToPoint};
 use project::{HoverBlock, HoverBlockKind, InlayHintLabelPart};
 use settings::Settings;
-use std::{borrow::Cow, cell::RefCell};
+use std::{borrow::Cow, cell::{Cell, RefCell}};
 use std::{ops::Range, sync::Arc, time::Duration};
 use std::{path::PathBuf, rc::Rc};
 use theme::ThemeSettings;
@@ -77,9 +77,9 @@ pub fn hover_at(
 
             let delay = 300; // Fixed 300ms hiding delay
             if delay > 0 {
-                let task = cx.spawn(|this, mut cx| async move {
+                let task = cx.spawn(|this: WeakView<Editor>, mut cx: AsyncWindowContext| async move {
                     cx.background_executor()
-                        .timer(Duration::from_millis(delay))
+                        .timer(Duration::from_millis(delay as u64))
                         .await;
                     this.update(&mut cx, |editor, cx| {
                         hide_hover(editor, cx);
@@ -221,7 +221,7 @@ pub fn hover_at_inlay(
                     scroll_handle,
                     keyboard_grace: Rc::new(RefCell::new(false)),
                     anchor: None,
-                    last_bounds: None,
+                    last_bounds: Rc::new(Cell::new(None)),
                     _subscription: subscription,
                 };
 
@@ -433,7 +433,7 @@ fn show_hover(
                     background_color,
                     keyboard_grace: Rc::new(RefCell::new(ignore_timeout)),
                     anchor,
-                    last_bounds: None,
+                    last_bounds: Rc::new(Cell::new(None)),
                     _subscription: subscription,
                 })
             } else {
@@ -502,7 +502,7 @@ fn show_hover(
                     scroll_handle,
                     keyboard_grace: Rc::new(RefCell::new(ignore_timeout)),
                     anchor: Some(anchor),
-                    last_bounds: None,
+                    last_bounds: Rc::new(Cell::new(None)),
                     _subscription: subscription,
                 })
             }
@@ -544,7 +544,7 @@ fn show_hover(
                     scroll_handle,
                     keyboard_grace: Rc::new(RefCell::new(ignore_timeout)),
                     anchor: Some(anchor),
-                    last_bounds: None,
+                    last_bounds: Rc::new(Cell::new(None)),
                     _subscription: subscription,
                 });
             }
@@ -862,12 +862,12 @@ impl HoverState {
 
         let mut popover_bounds = Vec::new();
         for info_popover in &self.info_popovers {
-            if let Some(bounds) = info_popover.last_bounds {
+            if let Some(bounds) = info_popover.last_bounds.get() {
                 popover_bounds.push(bounds);
             }
         }
         if let Some(diagnostic_popover) = &self.diagnostic_popover {
-            if let Some(bounds) = diagnostic_popover.last_bounds {
+            if let Some(bounds) = diagnostic_popover.last_bounds.get() {
                 popover_bounds.push(bounds);
             }
         }
@@ -895,9 +895,9 @@ impl HoverState {
     fn distance_from_point_to_bounds(&self, point: gpui::Point<Pixels>, bounds: Bounds<Pixels>) -> Pixels {
         let center_x = bounds.origin.x + bounds.size.width / 2.;
         let center_y = bounds.origin.y + bounds.size.height / 2.;
-        let dx = (point.x - center_x).abs() - bounds.size.width / 2.;
-        let dy = (point.y - center_y).abs() - bounds.size.height / 2.;
-        px((dx.max(px(0.)).0.powi(2) + dy.max(px(0.)).0.powi(2)).sqrt())
+        let dx: f32 = ((point.x - center_x).abs() - bounds.size.width / 2.).max(px(0.0)).into();
+        let dy: f32 = ((point.y - center_y).abs() - bounds.size.height / 2.).max(px(0.0)).into();
+        px((dx.powi(2) + dy.powi(2)).sqrt())
     }
 
     pub(crate) fn render(
@@ -1002,7 +1002,7 @@ pub struct InfoPopover {
     pub scroll_handle: ScrollHandle,
     pub keyboard_grace: Rc<RefCell<bool>>,
     pub anchor: Option<Anchor>,
-    pub last_bounds: Option<Bounds<Pixels>>,
+    pub last_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     _subscription: Option<Subscription>,
 }
 
@@ -1015,26 +1015,33 @@ impl InfoPopover {
     ) -> AnyElement {
         let keyboard_grace = Rc::clone(&self.keyboard_grace);
         let this = cx.entity().downgrade();
+        let bounds_cell = self.last_bounds.clone();
         div()
             .id("info_popover")
             .occlude()
             .elevation_2(cx)
-            .on_prepaint(move |bounds, _, cx| {
-                this.update(cx, |this, _| {
-                    if let Some(popover) = this.hover_state.info_popovers.iter_mut().find(|p| p.parsed_content.is_some()) {
-                        popover.last_bounds = Some(bounds);
-                    }
-                }).ok();
-            })
+            .child(
+                canvas(
+                    {
+                        let bounds_cell = bounds_cell.clone();
+                        move |bounds, _window, _cx| {
+                            bounds_cell.set(Some(bounds));
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
             // Prevent a mouse down/move on the popover from being propagated to the editor,
             // because that would dismiss the popover.
-            .on_mouse_move(|_, _, cx| cx.stop_propagation())
-            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+            .on_mouse_move(|_, _, cx: &mut WindowContext| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Left, move |_, _, cx: &mut WindowContext| {
                 let mut keyboard_grace = keyboard_grace.borrow_mut();
                 *keyboard_grace = false;
                 cx.stop_propagation();
             })
-            .when_some(self.parsed_content.clone(), |this, markdown| {
+            .when_some(self.parsed_content.clone(), |this: gpui::Stateful<gpui::Div>, markdown| {
                 this.child(
                     div()
                         .id("info-md-container")
@@ -1081,7 +1088,7 @@ pub struct DiagnosticPopover {
     background_color: Hsla,
     pub keyboard_grace: Rc<RefCell<bool>>,
     pub anchor: Anchor,
-    pub last_bounds: Option<Bounds<Pixels>>,
+    pub last_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     _subscription: Subscription,
     pub scroll_handle: ScrollHandle,
 }
@@ -1095,28 +1102,35 @@ impl DiagnosticPopover {
     ) -> AnyElement {
         let keyboard_grace = Rc::clone(&self.keyboard_grace);
         let this = cx.entity().downgrade();
+        let bounds_cell = self.last_bounds.clone();
         div()
             .id("diagnostic")
             .occlude()
             .elevation_2_borderless(cx)
-            .on_prepaint(move |bounds, _, cx| {
-                this.update(cx, |this, _| {
-                    if let Some(popover) = this.hover_state.diagnostic_popover.as_mut() {
-                        popover.last_bounds = Some(bounds);
-                    }
-                }).ok();
-            })
+            .child(
+                canvas(
+                    {
+                        let bounds_cell = bounds_cell.clone();
+                        move |bounds, _window, _cx| {
+                            bounds_cell.set(Some(bounds));
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
             // Don't draw the background color if the theme
             // allows transparent surfaces.
-            .when(theme_is_transparent(cx), |this| {
+            .when(theme_is_transparent(cx), |this: gpui::Stateful<gpui::Div>| {
                 this.bg(gpui::transparent_black())
             })
             // Prevent a mouse move on the popover from being propagated to the editor,
             // because that would dismiss the popover.
-            .on_mouse_move(|_, _, cx| cx.stop_propagation())
+            .on_mouse_move(|_, _, cx: &mut WindowContext| cx.stop_propagation())
             // Prevent a mouse down on the popover from being propagated to the editor,
             // because that would move the cursor.
-            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+            .on_mouse_down(MouseButton::Left, move |_, _, cx: &mut WindowContext| {
                 let mut keyboard_grace = keyboard_grace.borrow_mut();
                 *keyboard_grace = false;
                 cx.stop_propagation();
