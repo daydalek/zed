@@ -77,7 +77,7 @@ pub fn hover_at(
 
             let delay = 300u64; // Fixed 300ms hiding delay
             if delay > 0 {
-                let task = cx.spawn(move |this: WeakEntity<Editor>, cx| async move {
+                let task = cx.spawn(move |this: WeakEntity<Editor>, cx: &mut AsyncApp| async move {
                     let mut cx = cx.clone();
                     cx.background_executor()
                         .timer(Duration::from_millis(delay))
