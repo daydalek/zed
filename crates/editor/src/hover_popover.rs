@@ -68,6 +68,7 @@ pub fn hover_at(
             }
 
             if getting_closer {
+                editor.hover_state.hiding_delay_task = None;
                 return;
             }
 
@@ -991,6 +992,7 @@ impl InfoPopover {
         cx: &mut Context<Editor>,
     ) -> AnyElement {
         let keyboard_grace = Rc::clone(&self.keyboard_grace);
+        let this = cx.entity().downgrade();
         let bounds_cell = self.last_bounds.clone();
         div()
             .id("info_popover")
@@ -1011,7 +1013,15 @@ impl InfoPopover {
             )
             // Prevent a mouse down/move on the popover from being propagated to the editor,
             // because that would dismiss the popover.
-            .on_mouse_move(|_, _, cx: &mut App| cx.stop_propagation())
+            .on_mouse_move(move |_, _, cx: &mut App| {
+                if let Some(this) = this.upgrade() {
+                    this.update(cx, |editor, _| {
+                        editor.hover_state.closest_mouse_distance = Some(px(0.0));
+                        editor.hover_state.hiding_delay_task = None;
+                    }).ok();
+                }
+                cx.stop_propagation()
+            })
             .on_mouse_down(MouseButton::Left, move |_, _, cx: &mut App| {
                 let mut keyboard_grace = keyboard_grace.borrow_mut();
                 *keyboard_grace = false;
@@ -1103,7 +1113,15 @@ impl DiagnosticPopover {
             })
             // Prevent a mouse move on the popover from being propagated to the editor,
             // because that would dismiss the popover.
-            .on_mouse_move(|_, _, cx: &mut App| cx.stop_propagation())
+            .on_mouse_move(move |_, _, cx: &mut App| {
+                if let Some(this) = this.upgrade() {
+                    this.update(cx, |editor, _| {
+                        editor.hover_state.closest_mouse_distance = Some(px(0.0));
+                        editor.hover_state.hiding_delay_task = None;
+                    }).ok();
+                }
+                cx.stop_propagation()
+            })
             // Prevent a mouse down on the popover from being propagated to the editor,
             // because that would move the cursor.
             .on_mouse_down(MouseButton::Left, move |_, _, cx: &mut App| {
