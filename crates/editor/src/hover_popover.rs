@@ -8,10 +8,10 @@ use crate::{
 };
 use anyhow::Context as _;
 use gpui::{
-    canvas, App, AnyElement, AsyncApp, AsyncWindowContext, Bounds, Context, Entity, Focusable as _,
+    AnyElement, App, AsyncApp, AsyncWindowContext, Bounds, Context, Entity, Focusable as _,
     FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
     ScrollHandle, Size, StatefulInteractiveElement, StyleRefinement, Styled, Subscription, Task,
-    TextStyleRefinement, WeakEntity, Window, div, px,
+    TextStyleRefinement, WeakEntity, Window, canvas, div, px,
 };
 use itertools::Itertools;
 use language::{DiagnosticEntry, Language, LanguageRegistry};
@@ -20,7 +20,10 @@ use markdown::{Markdown, MarkdownElement, MarkdownStyle};
 use multi_buffer::{MultiBufferOffset, ToOffset, ToPoint};
 use project::{HoverBlock, HoverBlockKind, InlayHintLabelPart};
 use settings::Settings;
-use std::{borrow::Cow, cell::{Cell, RefCell}};
+use std::{
+    borrow::Cow,
+    cell::{Cell, RefCell},
+};
 use std::{ops::Range, sync::Arc, time::Duration};
 use std::{path::PathBuf, rc::Rc};
 use theme::ThemeSettings;
@@ -866,15 +869,24 @@ impl HoverState {
             }
         }
 
-        self.closest_mouse_distance = Some(distance.min(self.closest_mouse_distance.unwrap_or(distance)));
+        self.closest_mouse_distance =
+            Some(distance.min(self.closest_mouse_distance.unwrap_or(distance)));
         true
     }
 
-    fn distance_from_point_to_bounds(&self, point: gpui::Point<Pixels>, bounds: Bounds<Pixels>) -> Pixels {
+    fn distance_from_point_to_bounds(
+        &self,
+        point: gpui::Point<Pixels>,
+        bounds: Bounds<Pixels>,
+    ) -> Pixels {
         let center_x = bounds.origin.x + bounds.size.width / 2.;
         let center_y = bounds.origin.y + bounds.size.height / 2.;
-        let dx: f32 = ((point.x - center_x).abs() - bounds.size.width / 2.).max(px(0.0)).into();
-        let dy: f32 = ((point.y - center_y).abs() - bounds.size.height / 2.).max(px(0.0)).into();
+        let dx: f32 = ((point.x - center_x).abs() - bounds.size.width / 2.)
+            .max(px(0.0))
+            .into();
+        let dy: f32 = ((point.y - center_y).abs() - bounds.size.height / 2.)
+            .max(px(0.0))
+            .into();
         px((dx.powi(2) + dy.powi(2)).sqrt())
     }
 
@@ -1029,32 +1041,35 @@ impl InfoPopover {
                 *keyboard_grace = false;
                 cx.stop_propagation();
             })
-            .when_some(self.parsed_content.clone(), |this: gpui::Stateful<gpui::Div>, markdown| {
-                this.child(
-                    div()
-                        .id("info-md-container")
-                        .overflow_y_scroll()
-                        .max_w(max_size.width)
-                        .max_h(max_size.height)
-                        .track_scroll(&self.scroll_handle)
-                        .child(
-                            MarkdownElement::new(markdown, hover_markdown_style(window, cx))
-                                .code_block_renderer(markdown::CodeBlockRenderer::Default {
-                                    copy_button: false,
-                                    copy_button_on_hover: false,
-                                    border: false,
-                                })
-                                .on_url_click(open_markdown_url)
-                                .p_2(),
-                        ),
-                )
-                .custom_scrollbars(
-                    Scrollbars::for_settings::<EditorSettings>()
-                        .tracked_scroll_handle(&self.scroll_handle),
-                    window,
-                    cx,
-                )
-            })
+            .when_some(
+                self.parsed_content.clone(),
+                |this: gpui::Stateful<gpui::Div>, markdown| {
+                    this.child(
+                        div()
+                            .id("info-md-container")
+                            .overflow_y_scroll()
+                            .max_w(max_size.width)
+                            .max_h(max_size.height)
+                            .track_scroll(&self.scroll_handle)
+                            .child(
+                                MarkdownElement::new(markdown, hover_markdown_style(window, cx))
+                                    .code_block_renderer(markdown::CodeBlockRenderer::Default {
+                                        copy_button: false,
+                                        copy_button_on_hover: false,
+                                        border: false,
+                                    })
+                                    .on_url_click(open_markdown_url)
+                                    .p_2(),
+                            ),
+                    )
+                    .custom_scrollbars(
+                        Scrollbars::for_settings::<EditorSettings>()
+                            .tracked_scroll_handle(&self.scroll_handle),
+                        window,
+                        cx,
+                    )
+                },
+            )
             .into_any_element()
     }
 
@@ -1110,9 +1125,10 @@ impl DiagnosticPopover {
             )
             // Don't draw the background color if the theme
             // allows transparent surfaces.
-            .when(theme_is_transparent(cx), |this: gpui::Stateful<gpui::Div>| {
-                this.bg(gpui::transparent_black())
-            })
+            .when(
+                theme_is_transparent(cx),
+                |this: gpui::Stateful<gpui::Div>| this.bg(gpui::transparent_black()),
+            )
             // Prevent a mouse move on the popover from being propagated to the editor,
             // because that would dismiss the popover.
             .on_mouse_move({
