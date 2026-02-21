@@ -1112,13 +1112,16 @@ impl DiagnosticPopover {
             })
             // Prevent a mouse move on the popover from being propagated to the editor,
             // because that would dismiss the popover.
-            .on_mouse_move(move |_, _, cx: &mut App| {
-                this.update(cx, |editor, _| {
-                    editor.hover_state.closest_mouse_distance = Some(px(0.0));
-                    editor.hover_state.hiding_delay_task = None;
-                })
-                .ok();
-                cx.stop_propagation()
+            .on_mouse_move({
+                let this = this.clone();
+                move |_, _, cx: &mut App| {
+                    this.update(cx, |editor, _| {
+                        editor.hover_state.closest_mouse_distance = Some(px(0.0));
+                        editor.hover_state.hiding_delay_task = None;
+                    })
+                    .ok();
+                    cx.stop_propagation()
+                }
             })
             // Prevent a mouse down on the popover from being propagated to the editor,
             // because that would move the cursor.
