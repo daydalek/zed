@@ -70,33 +70,26 @@ pub fn hover_at(
                         .is_mouse_getting_closer(mouse_position, window, cx);
             }
 
-            if getting_closer {
-                editor.hover_state.hiding_delay_task = None;
+            // If we are moving away and a timer is already running, just let it count down.
+            if !getting_closer && editor.hover_state.hiding_delay_task.is_some() {
                 return;
             }
 
-            if editor.hover_state.hiding_delay_task.is_some() {
-                return;
-            }
-
-            let delay = 300u64; // Fixed 300ms hiding delay
-            if delay > 0 {
-                let task = cx.spawn(move |this: WeakEntity<Editor>, cx: &mut AsyncApp| {
-                    let mut cx = cx.clone();
-                    async move {
-                        cx.background_executor()
-                            .timer(Duration::from_millis(delay))
-                            .await;
-                        this.update(&mut cx, |editor, cx| {
-                            hide_hover(editor, cx);
-                        })
-                        .ok();
-                    }
-                });
-                editor.hover_state.hiding_delay_task = Some(task);
-            } else {
-                hide_hover(editor, cx);
-            }
+            // If we are moving closer, or if no timer is running at all, start/restart the 300ms timer.
+            let delay = 300u64;
+            let task = cx.spawn(move |this: WeakEntity<Editor>, cx: &mut AsyncApp| {
+                let mut cx = cx.clone();
+                async move {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(delay))
+                        .await;
+                    this.update(&mut cx, |editor, cx| {
+                        hide_hover(editor, cx);
+                    })
+                    .ok();
+                }
+            });
+            editor.hover_state.hiding_delay_task = Some(task);
         }
     }
 }
