@@ -190,6 +190,9 @@ pub fn hover_at_inlay(
 
         let hover_popover_delay = EditorSettings::get_global(cx).hover_popover_delay.0;
 
+        editor.hover_state.hiding_delay_task = None;
+        editor.hover_state.closest_mouse_distance = None;
+
         let task = cx.spawn_in(window, async move |this, cx| {
             async move {
                 cx.background_executor()
@@ -290,6 +293,9 @@ fn show_hover(
         .project()
         .map(|project| project.read(cx).languages().clone());
     let provider = editor.semantics_provider.clone()?;
+
+    editor.hover_state.hiding_delay_task = None;
+    editor.hover_state.closest_mouse_distance = None;
 
     if !ignore_timeout {
         if same_info_hover(editor, &snapshot, anchor)
