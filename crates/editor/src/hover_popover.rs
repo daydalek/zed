@@ -36,6 +36,7 @@ pub const MIN_POPOVER_CHARACTER_WIDTH: f32 = 20.;
 pub const MIN_POPOVER_LINE_HEIGHT: f32 = 4.;
 pub const POPOVER_RIGHT_OFFSET: Pixels = px(8.0);
 pub const HOVER_POPOVER_GAP: Pixels = px(10.);
+pub const HOVER_DISMISS_DELAY_MS: u64 = 300;
 
 /// Bindable action which uses the most recent selection head to trigger a hover
 pub fn hover(editor: &mut Editor, _: &Hover, window: &mut Window, cx: &mut Context<Editor>) {
@@ -73,7 +74,7 @@ pub fn hover_at(
             }
 
             // If we are moving closer, or if no timer is running at all, start/restart the 300ms timer.
-            let delay = 300u64;
+            let delay = HOVER_DISMISS_DELAY_MS;
             let task = cx.spawn(move |this: WeakEntity<Editor>, cx: &mut AsyncApp| {
                 let mut cx = cx.clone();
                 async move {
@@ -980,6 +981,37 @@ impl HoverState {
     }
 }
 
+fn with_hover_persistence(
+    element: gpui::Stateful<gpui::Div>,
+    bounds_cell: Rc<Cell<Option<Bounds<Pixels>>>>,
+    editor: WeakEntity<Editor>,
+) -> gpui::Stateful<gpui::Div> {
+    element
+        .child(
+            canvas(
+                {
+                    move |bounds, _window, _cx| {
+                        bounds_cell.set(Some(bounds));
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .size_full(),
+        )
+        // Prevent a mouse down/move on the popover from being propagated to the editor,
+        // because that would dismiss the popover.
+        .on_mouse_move(move |_, _, cx: &mut App| {
+            editor
+                .update(cx, |editor, _| {
+                    editor.hover_state.closest_mouse_distance = Some(px(0.0));
+                    editor.hover_state.hiding_delay_task = None;
+                })
+                .ok();
+            cx.stop_propagation()
+        })
+}
+
 pub struct InfoPopover {
     pub symbol_range: RangeInEditor,
     pub parsed_content: Option<Entity<Markdown>>,
@@ -1000,68 +1032,45 @@ impl InfoPopover {
         let keyboard_grace = Rc::clone(&self.keyboard_grace);
         let this = cx.entity().downgrade();
         let bounds_cell = self.last_bounds.clone();
-        div()
-            .id("info_popover")
-            .occlude()
-            .elevation_2(cx)
-            .child(
-                canvas(
-                    {
-                        move |bounds, _window, _cx| {
-                            bounds_cell.set(Some(bounds));
-                        }
-                    },
-                    |_, _, _, _| {},
-                )
-                .absolute()
-                .size_full(),
-            )
-            // Prevent a mouse down/move on the popover from being propagated to the editor,
-            // because that would dismiss the popover.
-            .on_mouse_move({
-                move |_, _, cx: &mut App| {
-                    this.update(cx, |editor, _| {
-                        editor.hover_state.closest_mouse_distance = Some(px(0.0));
-                        editor.hover_state.hiding_delay_task = None;
-                    })
-                    .ok();
-                    cx.stop_propagation()
-                }
-            })
-            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                let mut keyboard_grace = keyboard_grace.borrow_mut();
-                *keyboard_grace = false;
-                cx.stop_propagation();
-            })
-            .when_some(self.parsed_content.clone(), |this, markdown| {
-                this.child(
-                    div()
-                        .id("info-md-container")
-                        .overflow_y_scroll()
-                        .max_w(max_size.width)
-                        .max_h(max_size.height)
-                        .track_scroll(&self.scroll_handle)
-                        .child(
-                            MarkdownElement::new(markdown, hover_markdown_style(window, cx))
-                                .code_block_renderer(markdown::CodeBlockRenderer::Default {
-                                    copy_button: false,
-                                    copy_button_on_hover: false,
-                                    border: false,
-                                })
-                                .on_url_click(open_markdown_url)
-                                .p_2(),
-                        ),
-                )
-                .custom_scrollbars(
-                    Scrollbars::for_settings::<EditorSettings>()
-                        .tracked_scroll_handle(&self.scroll_handle),
-                    window,
-                    cx,
-                )
-            })
-            .into_any_element()
-    }
 
+        with_hover_persistence(
+            div().id("info_popover").occlude().elevation_2(cx),
+            bounds_cell,
+            this,
+        )
+        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+            let mut keyboard_grace = keyboard_grace.borrow_mut();
+            *keyboard_grace = false;
+            cx.stop_propagation();
+        })
+        .when_some(self.parsed_content.clone(), |this, markdown| {
+            this.child(
+                div()
+                    .id("info-md-container")
+                    .overflow_y_scroll()
+                    .max_w(max_size.width)
+                    .max_h(max_size.height)
+                    .track_scroll(&self.scroll_handle)
+                    .child(
+                        MarkdownElement::new(markdown, hover_markdown_style(window, cx))
+                            .code_block_renderer(markdown::CodeBlockRenderer::Default {
+                                copy_button: false,
+                                copy_button_on_hover: false,
+                                border: false,
+                            })
+                            .on_url_click(open_markdown_url)
+                            .p_2(),
+                    ),
+            )
+            .custom_scrollbars(
+                Scrollbars::for_settings::<EditorSettings>()
+                    .tracked_scroll_handle(&self.scroll_handle),
+                window,
+                cx,
+            )
+        })
+        .into_any_element()
+    }
     pub fn scroll(&self, amount: ScrollAmount, window: &mut Window, cx: &mut Context<Editor>) {
         let mut current = self.scroll_handle.offset();
         current.y -= amount.pixels(
@@ -1095,99 +1104,73 @@ impl DiagnosticPopover {
         let keyboard_grace = Rc::clone(&self.keyboard_grace);
         let this = cx.entity().downgrade();
         let bounds_cell = self.last_bounds.clone();
-        div()
-            .id("diagnostic")
-            .occlude()
-            .elevation_2_borderless(cx)
-            .child(
-                canvas(
-                    {
-                        move |bounds, _window, _cx| {
-                            bounds_cell.set(Some(bounds));
-                        }
-                    },
-                    |_, _, _, _| {},
+
+        with_hover_persistence(
+            div().id("diagnostic").occlude().elevation_2_borderless(cx),
+            bounds_cell,
+            this.clone(),
+        )
+        // Don't draw the background color if the theme
+        // allows transparent surfaces.
+        .when(theme_is_transparent(cx), |this| {
+            this.bg(gpui::transparent_black())
+        })
+        // Prevent a mouse down on the popover from being propagated to the editor,
+        // because that would move the cursor.
+        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+            let mut keyboard_grace = keyboard_grace.borrow_mut();
+            *keyboard_grace = false;
+            cx.stop_propagation();
+        })
+        .child(
+            div()
+                .relative()
+                .py_1()
+                .pl_2()
+                .pr_8()
+                .bg(self.background_color)
+                .border_1()
+                .border_color(self.border_color)
+                .rounded_lg()
+                .child(
+                    div()
+                        .id("diagnostic-content-container")
+                        .max_w(max_size.width)
+                        .max_h(max_size.height)
+                        .overflow_y_scroll()
+                        .track_scroll(&self.scroll_handle)
+                        .child(
+                            MarkdownElement::new(
+                                self.markdown.clone(),
+                                diagnostics_markdown_style(window, cx),
+                            )
+                            .code_block_renderer(markdown::CodeBlockRenderer::Default {
+                                copy_button: false,
+                                copy_button_on_hover: false,
+                                border: false,
+                            })
+                            .on_url_click(move |link, window, cx| {
+                                if let Some(renderer) = GlobalDiagnosticRenderer::global(cx) {
+                                    this.update(cx, |this, cx| {
+                                        renderer.as_ref().open_link(this, link, window, cx);
+                                    })
+                                    .ok();
+                                }
+                            }),
+                        ),
                 )
-                .absolute()
-                .size_full(),
-            )
-            // Don't draw the background color if the theme
-            // allows transparent surfaces.
-            .when(theme_is_transparent(cx), |this| {
-                this.bg(gpui::transparent_black())
-            })
-            // Prevent a mouse move on the popover from being propagated to the editor,
-            // because that would dismiss the popover.
-            .on_mouse_move({
-                let this = this.clone();
-                move |_, _, cx: &mut App| {
-                    this.update(cx, |editor, _| {
-                        editor.hover_state.closest_mouse_distance = Some(px(0.0));
-                        editor.hover_state.hiding_delay_task = None;
-                    })
-                    .ok();
-                    cx.stop_propagation()
-                }
-            })
-            // Prevent a mouse down on the popover from being propagated to the editor,
-            // because that would move the cursor.
-            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                let mut keyboard_grace = keyboard_grace.borrow_mut();
-                *keyboard_grace = false;
-                cx.stop_propagation();
-            })
-            .child(
-                div()
-                    .relative()
-                    .py_1()
-                    .pl_2()
-                    .pr_8()
-                    .bg(self.background_color)
-                    .border_1()
-                    .border_color(self.border_color)
-                    .rounded_lg()
-                    .child(
-                        div()
-                            .id("diagnostic-content-container")
-                            .max_w(max_size.width)
-                            .max_h(max_size.height)
-                            .overflow_y_scroll()
-                            .track_scroll(&self.scroll_handle)
-                            .child(
-                                MarkdownElement::new(
-                                    self.markdown.clone(),
-                                    diagnostics_markdown_style(window, cx),
-                                )
-                                .code_block_renderer(markdown::CodeBlockRenderer::Default {
-                                    copy_button: false,
-                                    copy_button_on_hover: false,
-                                    border: false,
-                                })
-                                .on_url_click(
-                                    move |link, window, cx| {
-                                        if let Some(renderer) = GlobalDiagnosticRenderer::global(cx)
-                                        {
-                                            this.update(cx, |this, cx| {
-                                                renderer.as_ref().open_link(this, link, window, cx);
-                                            })
-                                            .ok();
-                                        }
-                                    },
-                                ),
-                            ),
-                    )
-                    .child(div().absolute().top_1().right_1().child({
-                        let message = self.local_diagnostic.diagnostic.message.clone();
-                        CopyButton::new("copy-diagnostic", message).tooltip_label("Copy Diagnostic")
-                    }))
-                    .custom_scrollbars(
-                        Scrollbars::for_settings::<EditorSettings>()
-                            .tracked_scroll_handle(&self.scroll_handle),
-                        window,
-                        cx,
-                    ),
-            )
-            .into_any_element()
+                .child(div().absolute().top_1().right_1().child({
+                    let message = self.local_diagnostic.diagnostic.message.clone();
+                    CopyButton::new("copy-diagnostic", message).tooltip_label("Copy Diagnostic")
+                }))
+                .custom_scrollbars(
+                    Scrollbars::for_settings::<EditorSettings>()
+                        .tracked_scroll_handle(&self.scroll_handle),
+                    window,
+                    cx,
+                ),
+        )
+        .into_any_element()
     }
 }
 
