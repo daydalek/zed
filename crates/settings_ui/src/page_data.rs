@@ -1786,7 +1786,9 @@ fn editor_page() -> SettingsPage {
                 description: "Time to wait in milliseconds before hiding the hover popover after the mouse moves away.",
                 field: Box::new(SettingField {
                     json_path: Some("hover_popover_sticky_delay"),
-                    pick: |settings_content| settings_content.editor.hover_popover_sticky_delay.as_ref(),
+                    pick: |settings_content| {
+                        settings_content.editor.hover_popover_sticky_delay.as_ref()
+                    },
                     write: |settings_content, value| {
                         settings_content.editor.hover_popover_sticky_delay = value;
                     },
