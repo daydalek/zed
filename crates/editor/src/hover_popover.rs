@@ -63,6 +63,12 @@ pub fn hover_at(
             editor.hover_state.closest_mouse_distance = None;
             show_hover(editor, anchor, false, window, cx);
         } else {
+            let settings = EditorSettings::get_global(cx);
+            if !settings.hover_popover_sticky {
+                hide_hover(editor, cx);
+                return;
+            }
+
             let mut getting_closer = false;
             if let Some(mouse_position) = mouse_position {
                 getting_closer = editor.hover_state.is_mouse_getting_closer(mouse_position);
@@ -73,8 +79,8 @@ pub fn hover_at(
                 return;
             }
 
-            // If we are moving closer, or if no timer is running at all, start/restart the 300ms timer.
-            let delay = Duration::from_millis(300u64);
+            // If we are moving closer, or if no timer is running at all, start/restart the timer.
+            let delay = Duration::from_millis(settings.hover_popover_sticky_delay.0);
             let task = cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(delay).await;
                 this.update(cx, |editor, cx| {
@@ -1201,6 +1207,7 @@ mod tests {
     use markdown::parser::MarkdownEvent;
     use project::InlayId;
     use settings::InlayHintSettingsContent;
+    use settings::{DelayMs, SettingsStore};
     use smol::stream::StreamExt;
     use std::sync::atomic;
     use std::sync::atomic::AtomicUsize;
@@ -2148,5 +2155,163 @@ mod tests {
             range,
             InlayOffset(MultiBufferOffset(104))..InlayOffset(MultiBufferOffset(108))
         );
+    }
+
+    #[gpui::test]
+    async fn test_hover_popover_sticky_delay(cx: &mut gpui::TestAppContext) {
+        init_test(cx, |_| {});
+
+        let custom_delay_ms = 500u64;
+        cx.update(|cx| {
+            cx.update_global::<SettingsStore, _>(|settings, cx| {
+                settings.update_user_settings(cx, |settings| {
+                    settings.editor.hover_popover_sticky = Some(true);
+                    settings.editor.hover_popover_sticky_delay = Some(DelayMs(custom_delay_ms));
+                });
+            });
+        });
+
+        let mut cx = EditorLspTestContext::new_rust(
+            lsp::ServerCapabilities {
+                hover_provider: Some(lsp::HoverProviderCapability::Simple(true)),
+                ..Default::default()
+            },
+            cx,
+        )
+        .await;
+
+        cx.set_state(indoc! {"
+            fn ˇtest() { println!(); }
+        "});
+
+        // Trigger hover on a symbol
+        let hover_point = cx.display_point(indoc! {"
+            fn test() { printˇln!(); }
+        "});
+        let symbol_range = cx.lsp_range(indoc! {"
+            fn test() { «println!»(); }
+        "});
+        let mut requests =
+            cx.set_request_handler::<lsp::request::HoverRequest, _, _>(move |_, _, _| async move {
+                Ok(Some(lsp::Hover {
+                    contents: lsp::HoverContents::Markup(lsp::MarkupContent {
+                        kind: lsp::MarkupKind::Markdown,
+                        value: "some basic docs".to_string(),
+                    }),
+                    range: Some(symbol_range),
+                }))
+            });
+        cx.update_editor(|editor, window, cx| {
+            let snapshot = editor.snapshot(window, cx);
+            let anchor = snapshot
+                .buffer_snapshot()
+                .anchor_before(hover_point.to_offset(&snapshot, Bias::Left));
+            hover_at(editor, Some(anchor), None, window, cx)
+        });
+        cx.background_executor
+            .advance_clock(Duration::from_millis(get_hover_popover_delay(&cx) + 100));
+        requests.next().await;
+
+        // Hover should be visible
+        cx.editor(|editor, _, _| {
+            assert!(editor.hover_state.visible());
+        });
+
+        // Move mouse away (hover_at with None anchor triggers the hiding delay)
+        cx.update_editor(|editor, window, cx| {
+            hover_at(editor, None, None, window, cx)
+        });
+
+        // Popover should still be visible before the custom delay expires
+        cx.background_executor
+            .advance_clock(Duration::from_millis(custom_delay_ms - 100));
+        cx.editor(|editor, _, _| {
+            assert!(
+                editor.hover_state.visible(),
+                "Popover should remain visible before the sticky delay expires"
+            );
+        });
+
+        // After the full custom delay, the popover should be hidden
+        cx.background_executor
+            .advance_clock(Duration::from_millis(200));
+        cx.editor(|editor, _, _| {
+            assert!(
+                !editor.hover_state.visible(),
+                "Popover should be hidden after the sticky delay expires"
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_hover_popover_sticky_disabled(cx: &mut gpui::TestAppContext) {
+        init_test(cx, |_| {});
+
+        cx.update(|cx| {
+            cx.update_global::<SettingsStore, _>(|settings, cx| {
+                settings.update_user_settings(cx, |settings| {
+                    settings.editor.hover_popover_sticky = Some(false);
+                });
+            });
+        });
+
+        let mut cx = EditorLspTestContext::new_rust(
+            lsp::ServerCapabilities {
+                hover_provider: Some(lsp::HoverProviderCapability::Simple(true)),
+                ..Default::default()
+            },
+            cx,
+        )
+        .await;
+
+        cx.set_state(indoc! {"
+            fn ˇtest() { println!(); }
+        "});
+
+        // Trigger hover on a symbol
+        let hover_point = cx.display_point(indoc! {"
+            fn test() { printˇln!(); }
+        "});
+        let symbol_range = cx.lsp_range(indoc! {"
+            fn test() { «println!»(); }
+        "});
+        let mut requests =
+            cx.set_request_handler::<lsp::request::HoverRequest, _, _>(move |_, _, _| async move {
+                Ok(Some(lsp::Hover {
+                    contents: lsp::HoverContents::Markup(lsp::MarkupContent {
+                        kind: lsp::MarkupKind::Markdown,
+                        value: "some basic docs".to_string(),
+                    }),
+                    range: Some(symbol_range),
+                }))
+            });
+        cx.update_editor(|editor, window, cx| {
+            let snapshot = editor.snapshot(window, cx);
+            let anchor = snapshot
+                .buffer_snapshot()
+                .anchor_before(hover_point.to_offset(&snapshot, Bias::Left));
+            hover_at(editor, Some(anchor), None, window, cx)
+        });
+        cx.background_executor
+            .advance_clock(Duration::from_millis(get_hover_popover_delay(&cx) + 100));
+        requests.next().await;
+
+        // Hover should be visible
+        cx.editor(|editor, _, _| {
+            assert!(editor.hover_state.visible());
+        });
+
+        // Move mouse away — with sticky disabled, hide immediately
+        cx.update_editor(|editor, window, cx| {
+            hover_at(editor, None, None, window, cx)
+        });
+
+        // Popover should be hidden immediately without any delay
+        cx.editor(|editor, _, _| {
+            assert!(
+                !editor.hover_state.visible(),
+                "Popover should be hidden immediately when sticky is disabled"
+            );
+        });
     }
 }
