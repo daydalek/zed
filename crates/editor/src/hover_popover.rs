@@ -60,7 +60,7 @@ pub fn hover_at(
 
         if let Some(anchor) = anchor {
             editor.hover_state.hiding_delay_task = None;
-            editor.hover_state.closest_mouse_distance = None;
+            editor.hover_state.last_mouse_distance = None;
             show_hover(editor, anchor, false, window, cx);
         } else {
             let settings = EditorSettings::get_global(cx);
@@ -190,7 +190,7 @@ pub fn hover_at_inlay(
         let hover_popover_delay = EditorSettings::get_global(cx).hover_popover_delay.0;
 
         editor.hover_state.hiding_delay_task = None;
-        editor.hover_state.closest_mouse_distance = None;
+        editor.hover_state.last_mouse_distance = None;
 
         let task = cx.spawn_in(window, async move |this, cx| {
             async move {
@@ -254,7 +254,7 @@ pub fn hide_hover(editor: &mut Editor, cx: &mut Context<Editor>) -> bool {
     editor.hover_state.info_task = None;
     editor.hover_state.triggered_from = None;
     editor.hover_state.hiding_delay_task = None;
-    editor.hover_state.closest_mouse_distance = None;
+    editor.hover_state.last_mouse_distance = None;
 
     editor.clear_background_highlights(HighlightKey::HoverState, cx);
 
@@ -294,7 +294,7 @@ fn show_hover(
     let provider = editor.semantics_provider.clone()?;
 
     editor.hover_state.hiding_delay_task = None;
-    editor.hover_state.closest_mouse_distance = None;
+    editor.hover_state.last_mouse_distance = None;
 
     if !ignore_timeout {
         if same_info_hover(editor, &snapshot, anchor)
@@ -823,7 +823,7 @@ pub struct HoverState {
     pub diagnostic_popover: Option<DiagnosticPopover>,
     pub triggered_from: Option<Anchor>,
     pub info_task: Option<Task<Option<()>>>,
-    pub closest_mouse_distance: Option<Pixels>,
+    pub last_mouse_distance: Option<Pixels>,
     pub hiding_delay_task: Option<Task<()>>,
 }
 
@@ -859,15 +859,14 @@ impl HoverState {
             .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(px(f32::MAX));
 
-        if let Some(closest_distance) = self.closest_mouse_distance {
-            if distance > closest_distance + px(4.0) {
-                return false;
-            }
-        }
+        let getting_closer = if let Some(last_distance) = self.last_mouse_distance {
+            distance <= last_distance + px(2.0)
+        } else {
+            true
+        };
 
-        self.closest_mouse_distance =
-            Some(distance.min(self.closest_mouse_distance.unwrap_or(distance)));
-        true
+        self.last_mouse_distance = Some(distance);
+        getting_closer
     }
 
     fn distance_from_point_to_bounds(
@@ -1023,7 +1022,7 @@ impl InfoPopover {
             .on_mouse_move({
                 move |_, _, cx: &mut App| {
                     this.update(cx, |editor, _| {
-                        editor.hover_state.closest_mouse_distance = Some(px(0.0));
+                        editor.hover_state.last_mouse_distance = Some(px(0.0));
                         editor.hover_state.hiding_delay_task = None;
                     })
                     .ok();
@@ -1123,7 +1122,7 @@ impl DiagnosticPopover {
                 let this = this.clone();
                 move |_, _, cx: &mut App| {
                     this.update(cx, |editor, _| {
-                        editor.hover_state.closest_mouse_distance = Some(px(0.0));
+                        editor.hover_state.last_mouse_distance = Some(px(0.0));
                         editor.hover_state.hiding_delay_task = None;
                     })
                     .ok();
