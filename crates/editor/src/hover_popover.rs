@@ -309,7 +309,6 @@ fn show_hover(
     if !ignore_timeout {
         if same_info_hover(editor, &snapshot, anchor)
             || same_diagnostic_hover(editor, &snapshot, anchor)
-            || editor.hover_state.diagnostic_popover.is_some()
         {
             // Hover triggered from same location as last time. Don't show again.
             return None;
@@ -321,7 +320,9 @@ fn show_hover(
             // response arrives, giving a seamless transition instead of a flash
             // of disappearance (which is especially bad when `symbol_range` is
             // zero-width because the LSP omitted the `range` field).
-            hide_hover(editor, cx);
+            if editor.hover_state.diagnostic_popover.is_none() {
+                hide_hover(editor, cx);
+            }
         }
     }
 
