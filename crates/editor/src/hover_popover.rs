@@ -70,9 +70,9 @@ pub fn hover_at(
                     editor.hover_state.is_mouse_getting_closer(mouse_position);
                 }
             }
-        } else if !editor.hover_state.visible() {
-            editor.hover_state.info_task = None;
         } else {
+            editor.hover_state.info_task = None;
+
             let settings = EditorSettings::get_global(cx);
             if !settings.hover_popover_sticky {
                 hide_hover(editor, cx);
