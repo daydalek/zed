@@ -575,25 +575,29 @@ fn show_hover(
             }
 
             this.update_in(cx, |editor, window, cx| {
-                // If the user swept past text to reach an existing popover,
-                // their mouse is now inside the old popover's bounds.
-                // We should NOT overwrite the popover with the swept text's hover.
-                let mouse_position = window.mouse_position();
-                let mouse_in_old_popover = editor
-                    .hover_state
-                    .info_popovers
-                    .iter()
-                    .filter_map(|p| p.last_bounds.get())
-                    .any(|bounds| bounds.contains(&mouse_position))
-                    || editor
+                if !ignore_timeout {
+                    // If the user swept past text to reach an existing popover,
+                    // their mouse is now inside the old popover's bounds.
+                    // We should NOT overwrite the popover with the swept text's hover.
+                    // Skip this guard when the hover was triggered by keyboard
+                    // (ignore_timeout is true), since the mouse position is irrelevant.
+                    let mouse_position = window.mouse_position();
+                    let mouse_in_old_popover = editor
                         .hover_state
-                        .diagnostic_popover
-                        .as_ref()
-                        .and_then(|p| p.last_bounds.get())
-                        .is_some_and(|bounds| bounds.contains(&mouse_position));
+                        .info_popovers
+                        .iter()
+                        .filter_map(|p| p.last_bounds.get())
+                        .any(|bounds| bounds.contains(&mouse_position))
+                        || editor
+                            .hover_state
+                            .diagnostic_popover
+                            .as_ref()
+                            .and_then(|p| p.last_bounds.get())
+                            .is_some_and(|bounds| bounds.contains(&mouse_position));
 
-                if mouse_in_old_popover {
-                    return;
+                    if mouse_in_old_popover {
+                        return;
+                    }
                 }
 
                 if hover_highlights.is_empty() {
