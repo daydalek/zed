@@ -213,8 +213,7 @@ pub fn hover_at_inlay(
 
                 let language_registry = project.read_with(cx, |p, _| p.languages().clone());
                 let blocks = vec![inlay_hover.tooltip];
-                let parsed_content =
-                    parse_blocks(&blocks, Some(&language_registry), None, cx).await;
+                let parsed_content = parse_blocks(&blocks, Some(&language_registry), None, cx);
 
                 let scroll_handle = ScrollHandle::new();
 
@@ -510,8 +509,7 @@ fn show_hover(
                     text: format!("Unicode character U+{:02X}", invisible as u32),
                     kind: HoverBlockKind::PlainText,
                 }];
-                let parsed_content =
-                    parse_blocks(&blocks, language_registry.as_ref(), None, cx).await;
+                let parsed_content = parse_blocks(&blocks, language_registry.as_ref(), None, cx);
                 let scroll_handle = ScrollHandle::new();
                 let subscription = this
                     .update(cx, |_, cx| {
@@ -552,7 +550,7 @@ fn show_hover(
                 let blocks = hover_result.contents;
                 let language = hover_result.language;
                 let parsed_content =
-                    parse_blocks(&blocks, language_registry.as_ref(), language, cx).await;
+                    parse_blocks(&blocks, language_registry.as_ref(), language, cx);
                 let scroll_handle = ScrollHandle::new();
                 hover_highlights.push(range.clone());
                 let subscription = this
@@ -664,7 +662,7 @@ fn same_diagnostic_hover(editor: &Editor, snapshot: &EditorSnapshot, anchor: Anc
         .unwrap_or(false)
 }
 
-async fn parse_blocks(
+fn parse_blocks(
     blocks: &[HoverBlock],
     language_registry: Option<&Arc<LanguageRegistry>>,
     language: Option<Arc<Language>>,
@@ -1245,13 +1243,13 @@ mod tests {
         test::editor_lsp_test_context::EditorLspTestContext,
     };
     use collections::BTreeSet;
+    use futures::stream::StreamExt;
     use gpui::App;
     use indoc::indoc;
     use markdown::parser::MarkdownEvent;
     use project::InlayId;
     use settings::InlayHintSettingsContent;
     use settings::{DelayMs, SettingsStore};
-    use smol::stream::StreamExt;
     use std::sync::atomic;
     use std::sync::atomic::AtomicUsize;
     use text::Bias;
@@ -1993,6 +1991,7 @@ mod tests {
             PointForPosition {
                 previous_valid,
                 next_valid,
+                nearest_valid: previous_valid,
                 exact_unclipped,
                 column_overshoot_after_line_end: 0,
             }
@@ -2120,6 +2119,7 @@ mod tests {
             PointForPosition {
                 previous_valid,
                 next_valid,
+                nearest_valid: previous_valid,
                 exact_unclipped,
                 column_overshoot_after_line_end: 0,
             }
