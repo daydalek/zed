@@ -145,13 +145,15 @@ impl FileDiffView {
                     }
 
                     log::trace!("start recalculating");
-                    let (old_snapshot, new_snapshot) = this.update(cx, |this, cx| {
+                    let (old_snapshot, new_snapshot, old_buffer) = this.update(cx, |this, cx| {
                         (
                             this.old_buffer.read(cx).snapshot(),
                             this.new_buffer.read(cx).snapshot(),
+                            this.old_buffer.clone(),
                         )
                     })?;
                     diff.update(cx, |diff, cx| {
+                        sync_diff_base_text_language(diff, &old_buffer, cx);
                         diff.set_base_text(
                             Some(old_snapshot.text().as_str().into()),
                             new_snapshot.text.clone(),
@@ -175,18 +177,21 @@ pub(crate) async fn build_buffer_diff(
 ) -> Result<Entity<BufferDiff>> {
     let old_buffer_snapshot = old_buffer.read_with(cx, |buffer, _| buffer.snapshot());
     let new_buffer_snapshot = new_buffer.read_with(cx, |buffer, _| buffer.snapshot());
-    let language_registry = new_buffer.read_with(cx, |buffer, _| buffer.language_registry());
+    let language_registry = old_buffer
+        .read_with(cx, |buffer, _| buffer.language_registry())
+        .or_else(|| new_buffer.read_with(cx, |buffer, _| buffer.language_registry()));
 
     let diff = cx.new(|cx| {
         BufferDiff::new(
             &new_buffer_snapshot.text,
-            new_buffer_snapshot.language().cloned(),
+            old_buffer_snapshot.language().cloned(),
             language_registry,
             cx,
         )
     });
 
     diff.update(cx, |diff, cx| {
+        sync_diff_base_text_language(diff, old_buffer, cx);
         diff.set_base_text(
             Some(old_buffer_snapshot.text().into()),
             new_buffer_snapshot.text.clone(),
@@ -196,6 +201,21 @@ pub(crate) async fn build_buffer_diff(
     .await;
 
     Ok(diff)
+}
+
+fn sync_diff_base_text_language(
+    diff: &BufferDiff,
+    source_buffer: &Entity<Buffer>,
+    cx: &mut App,
+) {
+    let language = source_buffer.read(cx).language().cloned();
+    let language_registry = source_buffer.read(cx).language_registry();
+    diff.base_text_buffer().update(cx, |base_text_buffer, cx| {
+        if let Some(language_registry) = language_registry {
+            base_text_buffer.set_language_registry(language_registry);
+        }
+        base_text_buffer.set_language_async(language, cx);
+    });
 }
 
 impl EventEmitter<EditorEvent> for FileDiffView {}
